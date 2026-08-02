@@ -15,16 +15,16 @@ int main(int argc, char *argv[])
     while (1)
     {
         printf("mysh> ");
-        // TODO: read a line of input using getline()
+        // read a line of input using getline()
         chars = getline(&buffer, &bufsize, stdin); // dynamic allocation, must free later
-        // TODO: check if getline returned -1 (e.g. Ctrl+D / EOF) and exit the loop if so
+        // checsk if getline returned -1 (e.g. Ctrl+D / EOF) and exit the loop if so
         if (chars == -1)
             break;
-        // TODO: strip the trailing newline character that getline includes
+        // strips trailing newline character that getline includes
         buffer[chars - 1] = '\0';
 
-        // TODO: tokenize the line into an argument array
-        char *token = strtok(chars, " ");
+        // tokenize the line into an argument array
+        char *token = strtok(chars, " "); // returns pointer to start of first token
         int size = 0;
         char **tokens = NULL;
         if (token == NULL)
@@ -43,16 +43,40 @@ int main(int argc, char *argv[])
             }
             tokens = temp;
             tokens[size - 1] = token;
-            token = strtok(NULL, " ");
+            token = strtok(NULL, " "); // internal static pointer remembers where it was in the string
+            // NULL tells strtok we arent using a new string
         }
 
-        // TODO: skip forking if the line was empty (e.g. user just hit Enter)
+        if (tokens != NULL)
+        {
+            pid_t childpid, wait;
+            childpid = fork();
+            int status, failure;
+            if (childpid == -1)
+            {
+                perror("fork");
+                exit(EXIT_FAILURE);
+            }
+            else if (childpid == 0) // means we're in the child
+            {
+                failure = execvp(tokens[0], tokens);
+                if (failure == -1)
+                {
+                    perror("execvp");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            else // means we're in the parent
+            {
 
-        // TODO: fork()
-        //   - check for fork failure (-1)
-        //   - in the child (return value 0): call execvp() with your args array,
-        //     then handle the case where execvp fails (it only returns on error)
-        //   - in the parent: call waitpid() on the child's pid
+                wait = waitpid(childpid, &status, 0);
+                if (wait == -1)
+                {
+                    perror("waitpid");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
     }
 
     free(buffer);
