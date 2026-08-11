@@ -10,6 +10,10 @@
 #define MAX_ARGS 64
 #define HASHSIZE 101
 
+int EXIT_STATUS = 0; // temporary holder of exit status
+// Reminder: make sure exit_status affects all code including cd, export and set
+// but ill work on it later this is just temp
+
 /*
 code for a dictionary/hashtable data structure taken from The C Programming Language textbook
 */
@@ -147,6 +151,13 @@ int main(int argc, char *argv[])
                     if (wait == -1)
                     {
                         perror("waitpid");
+                    }
+                    else
+                    {
+                        if (WIFEXITED(status))
+                        {
+                            EXIT_STATUS = WEXITSTATUS(status);
+                        }
                     }
                 }
             }
