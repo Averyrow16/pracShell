@@ -79,8 +79,9 @@ int main(int argc, char *argv[])
     ssize_t chars;
     while (1)
     {
-        int size = 0;
+        int toksize = 0, comsize = 0;
         char **tokens = NULL;
+        char **commands = NULL;
         printf("mysh> ");
         // read a line of input using getline()
         chars = getline(&buffer, &bufsize, stdin); // dynamic allocation, must free later
@@ -89,120 +90,154 @@ int main(int argc, char *argv[])
             break;
         // strips trailing newline character that getline includes
         buffer[chars - 1] = '\0';
-
-        // tokenize the line into an argument array
-        char *token = strtok(buffer, " "); // returns pointer to start of first token
-        if (token == NULL)
+        char *command = strtok(buffer, "&&");
+        if (command == NULL)
         {
-            free(tokens);
+            free(commands);
         }
-        while (token != NULL)
+        while (command != NULL)
         {
-            size++;
-            char **temp = realloc(tokens, size * sizeof(char *));
+            comsize++;
+            char **temp = realloc(commands, comsize * sizeof(char *));
             if (temp == NULL)
             {
                 printf("Out of memory\n");
-                free(tokens);
+                free(commands);
                 exit(EXIT_FAILURE);
             }
-            tokens = temp;
-            tokens[size - 1] = token;
-            token = strtok(NULL, " "); // internal static pointer remembers where it was in the string
+            commands = temp;
+            commands[comsize - 1] = command;
+            command = strtok(NULL, "&&"); // internal static pointer remembers where it was in the string
             // NULL tells strtok we arent using a new string
         }
-        if (size != 0)
+        if (comsize != 0) // if there are actual commands
         {
-            char **temp = realloc(tokens, (size + 1) * sizeof(char *));
-            tokens = temp;
-            tokens[size] = NULL;
+            char **temp = realloc(commands, (comsize + 1) * sizeof(char *));
+            commands = temp;
+            commands[comsize] = NULL; // terminates with null
         }
-        if (tokens != NULL)
+        for (int com = 0; com < comsize; com++) // for each command
         {
-            pid_t childpid, wait;
-            const char *parent_processes[] = {"cd", "pwd", "exit", "export", "set"};
-            bool parent = false;
-            for (int i = 0; i < 5; i++)
-                if (strcmp(tokens[0], parent_processes[i]) == 0)
-                    parent = true;
-            if (parent == false)
-            {
+            toksize = 0;
+            tokens = NULL;
+            printf("command: [%s]\n", commands[com]);
 
-                childpid = fork();
-                int status, failure;
-                if (childpid == -1)
+            char *curbuffer = commands[com];
+            // tokenize the line into an argument array
+            char *token = strtok(curbuffer, " "); // returns pointer to start of first token
+            if (token == NULL)
+            {
+                free(tokens);
+            }
+            while (token != NULL)
+            {
+                toksize++;
+                char **temp = realloc(tokens, toksize * sizeof(char *));
+                if (temp == NULL)
                 {
-                    perror("fork");
+                    printf("Out of memory\n");
+                    free(tokens);
                     exit(EXIT_FAILURE);
                 }
-                else if (childpid == 0) // means we're in the child
-                {
-                    failure = execvp(tokens[0], tokens);
-                    if (failure == -1)
-                    {
-                        perror("execvp");
-                        exit(EXIT_FAILURE);
-                    }
-                }
-                else // means we're in the parent
+                tokens = temp;
+                tokens[toksize - 1] = token;
+                token = strtok(NULL, " "); // internal static pointer remembers where it was in the string
+                // NULL tells strtok we arent using a new string
+            }
+            if (toksize != 0)
+            {
+                char **temp = realloc(tokens, (toksize + 1) * sizeof(char *));
+                tokens = temp;
+                tokens[toksize] = NULL;
+            }
+            if (tokens != NULL)
+            {
+                printf("[%s]\n", tokens[1]);
+                pid_t childpid, wait;
+                const char *parent_processes[] = {"cd", "pwd", "exit", "export", "set"};
+                bool parent = false;
+                for (int i = 0; i < 5; i++)
+                    if (strcmp(tokens[0], parent_processes[i]) == 0)
+                        parent = true;
+                if (parent == false)
                 {
 
-                    wait = waitpid(childpid, &status, 0);
-                    if (wait == -1)
+                    childpid = fork();
+                    int status, failure;
+                    if (childpid == -1)
                     {
-                        perror("waitpid");
+                        perror("fork");
+                        exit(EXIT_FAILURE);
                     }
-                    else
+                    else if (childpid == 0) // means we're in the child
                     {
-                        if (WIFEXITED(status))
+                        failure = execvp(tokens[0], tokens);
+                        if (failure == -1)
                         {
-                            EXIT_STATUS = WEXITSTATUS(status);
+                            perror("execvp");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    else // means we're in the parent
+                    {
+
+                        wait = waitpid(childpid, &status, 0);
+                        if (wait == -1)
+                        {
+                            perror("waitpid");
+                        }
+                        else
+                        {
+                            if (WIFEXITED(status))
+                            {
+                                EXIT_STATUS = WEXITSTATUS(status);
+                            }
                         }
                     }
                 }
-            }
-            else
-            {
-                if (strcmp(tokens[0], "cd") == 0)
+                else
                 {
-                    int chdir_fail = chdir(tokens[1]); // returns whether or not change directory worked
-                    if (chdir_fail == -1)
+                    if (strcmp(tokens[0], "cd") == 0)
                     {
-                        perror("chdir");
+                        int chdir_fail = chdir(tokens[1]); // returns whether or not change directory worked
+                        if (chdir_fail == -1)
+                        {
+                            perror("chdir");
+                        }
                     }
-                }
-                if (strcmp(tokens[0], "pwd") == 0)
-                {
-                    char cwd[100];
-                    char *cwd_ = getcwd(cwd, 100);
-                    if (cwd_ == NULL)
+                    if (strcmp(tokens[0], "pwd") == 0)
                     {
-                        perror("getcwd");
+                        char cwd[100];
+                        char *cwd_ = getcwd(cwd, 100);
+                        if (cwd_ == NULL)
+                        {
+                            perror("getcwd");
+                        }
+                        printf("%s\n", cwd);
                     }
-                    printf("%s\n", cwd);
-                }
-                if (strcmp(tokens[0], "export") == 0)
-                {
-                    char *env_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
-                    char *env_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
-                    // this overwrites tokens[1] but thats ok cuz tokens get reper after this anyways
-                    int export_fail = setenv(env_var_name, env_var_value, 1);
-                    if (export_fail == -1)
+                    if (strcmp(tokens[0], "export") == 0)
                     {
-                        perror("export");
+                        char *env_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
+                        char *env_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
+                        // this overwrites tokens[1] but thats ok cuz tokens get reper after this anyways
+                        int export_fail = setenv(env_var_name, env_var_value, 1);
+                        if (export_fail == -1)
+                        {
+                            perror("export");
+                        }
                     }
-                }
-                if (strcmp(tokens[0], "set") == 0)
-                {
-                    char *local_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
-                    char *local_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
-                    if (local_var_name == NULL || local_var_value == NULL)
+                    if (strcmp(tokens[0], "set") == 0)
                     {
-                        printf("set failure\n");
-                    }
-                    else
-                    {
-                        install(local_var_name, local_var_value);
+                        char *local_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
+                        char *local_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
+                        if (local_var_name == NULL || local_var_value == NULL)
+                        {
+                            printf("set failure\n");
+                        }
+                        else
+                        {
+                            install(local_var_name, local_var_value);
+                        }
                     }
                 }
             }
