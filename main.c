@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #define MAX_ARGS 64
 #define HASHSIZE 101
@@ -157,10 +158,57 @@ int main(int argc, char *argv[])
             {
                 pid_t childpid, wait;
                 const char *parent_processes[] = {"cd", "pwd", "exit", "export", "set"};
+                const char *redirect_symbols[] = {"<", ">", ">>", "2>"};
+                char **redirections = NULL;
+                char **symbols = NULL;
+                int *indexes = NULL;
+                int redirect_count = 0;
                 bool parent = false;
                 for (int i = 0; i < 5; i++)
                     if (strcmp(tokens[0], parent_processes[i]) == 0)
                         parent = true;
+                for (int i = 0; i < 4; i++)
+                    for (int j = 1; j < toksize; j++)
+                    {
+                        // this whole if statement just adds to the redirect and symbol lists and reallocs them
+                        if (strcmp(tokens[j], redirect_symbols[i]) == 0)
+                        {
+                            if (tokens[j + 1] != NULL)
+                            {
+                                redirect_count++;
+                                char **temp_red = realloc(redirections, redirect_count * sizeof(char **));
+                                if (temp_red == NULL)
+                                {
+                                    printf("Mem. realloc. failed");
+                                    free(redirections);
+                                }
+                                redirections = temp_red;
+                                redirections[redirect_count - 1] = tokens[j + 1]; // adds the file that will redirect
+                                char **temp_sym = realloc(symbols, redirect_count * sizeof(char **));
+                                if (temp_sym == NULL)
+                                {
+                                    printf("Mem. realloc. failed");
+                                    free(symbols);
+                                }
+                                symbols = temp_sym;
+                                symbols[redirect_count - 1] = tokens[j];                              // adds the symbol                                                               // skips the filename that would come right after
+                                int *temp_idx = realloc(indexes, redirect_count * 2 * sizeof(int *)); // reallocs for indexes of symbols and redirections
+                                if (temp_idx == NULL)
+                                {
+                                    printf("Mem. realloc. failed");
+                                    free(indexes);
+                                }
+                                indexes = temp_idx;
+                                indexes[(redirect_count - 1) * 2] = j;
+                                indexes[(redirect_count - 1) * 2 + 1] = j + 1;
+                                j++;
+                            }
+                            else
+                            { // if the command ended with <, >, >> or 2>
+                                printf("Error: no token after redirection symbol");
+                            }
+                        }
+                    }
                 if (parent == false)
                 {
 
@@ -246,7 +294,7 @@ int main(int argc, char *argv[])
                     {
                         if (tokens[1] == NULL)
                         {
-                            printf("Error: no path given\n");
+                            printf("Error: no variable given\n");
                         }
                         else
                         {
@@ -258,7 +306,7 @@ int main(int argc, char *argv[])
                             }
                             else
                             {
-                                install(local_var_name, local_var_value);
+                                install(local_var_name, local_var_value); // adds to hashtable
                             }
                         }
                     }
