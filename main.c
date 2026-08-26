@@ -77,24 +77,27 @@ int main(int argc, char *argv[])
     char *buffer = NULL;
     size_t bufsize = 0;
     ssize_t chars;
+    char **tokens = NULL;
+    char **commands = NULL;
     while (1)
     {
+
+        free(tokens);
+        free(commands);
+        tokens = NULL;
+        commands = NULL;
         int toksize = 0, comsize = 0;
-        char **tokens = NULL;
-        char **commands = NULL;
         printf("mysh> ");
         // read a line of input using getline()
         chars = getline(&buffer, &bufsize, stdin); // dynamic allocation, must free later
         // checsk if getline returned -1 (e.g. Ctrl+D / EOF) and exit the loop if so
         if (chars == -1)
+        {
             break;
+        }
         // strips trailing newline character that getline includes
         buffer[chars - 1] = '\0';
         char *command = strtok(buffer, "&&");
-        if (command == NULL)
-        {
-            free(commands);
-        }
         while (command != NULL)
         {
             comsize++;
@@ -119,8 +122,8 @@ int main(int argc, char *argv[])
         for (int com = 0; com < comsize; com++) // for each command
         {
             toksize = 0;
+            free(tokens);
             tokens = NULL;
-            printf("command: [%s]\n", commands[com]);
 
             char *curbuffer = commands[com];
             // tokenize the line into an argument array
@@ -152,7 +155,6 @@ int main(int argc, char *argv[])
             }
             if (tokens != NULL)
             {
-                printf("[%s]\n", tokens[1]);
                 pid_t childpid, wait;
                 const char *parent_processes[] = {"cd", "pwd", "exit", "export", "set"};
                 bool parent = false;
@@ -199,10 +201,17 @@ int main(int argc, char *argv[])
                 {
                     if (strcmp(tokens[0], "cd") == 0)
                     {
-                        int chdir_fail = chdir(tokens[1]); // returns whether or not change directory worked
-                        if (chdir_fail == -1)
+                        if (tokens[1] == NULL) // change to go backwards in directory later
                         {
-                            perror("chdir");
+                            printf("Error: no path given\n");
+                        }
+                        else
+                        {
+                            int chdir_fail = chdir(tokens[1]); // returns whether or not change directory worked
+                            if (chdir_fail == -1)
+                            {
+                                perror("chdir");
+                            }
                         }
                     }
                     if (strcmp(tokens[0], "pwd") == 0)
@@ -217,33 +226,46 @@ int main(int argc, char *argv[])
                     }
                     if (strcmp(tokens[0], "export") == 0)
                     {
-                        char *env_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
-                        char *env_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
-                        // this overwrites tokens[1] but thats ok cuz tokens get reper after this anyways
-                        int export_fail = setenv(env_var_name, env_var_value, 1);
-                        if (export_fail == -1)
+                        if (tokens[1] == NULL)
                         {
-                            perror("export");
+                            printf("Error: no variable given\n");
+                        }
+                        else
+                        {
+                            char *env_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
+                            char *env_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
+                            // this overwrites tokens[1] but thats ok cuz tokens get reper after this anyways
+                            int export_fail = setenv(env_var_name, env_var_value, 1);
+                            if (export_fail == -1)
+                            {
+                                perror("export");
+                            }
                         }
                     }
                     if (strcmp(tokens[0], "set") == 0)
                     {
-                        char *local_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
-                        char *local_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
-                        if (local_var_name == NULL || local_var_value == NULL)
+                        if (tokens[1] == NULL)
                         {
-                            printf("set failure\n");
+                            printf("Error: no path given\n");
                         }
                         else
                         {
-                            install(local_var_name, local_var_value);
+                            char *local_var_name = strtok(tokens[1], "="); // gets name of env variable to be added
+                            char *local_var_value = strtok(NULL, "=");     // gets everything past the = aka the value
+                            if (local_var_name == NULL || local_var_value == NULL)
+                            {
+                                printf("set failure\n");
+                            }
+                            else
+                            {
+                                install(local_var_name, local_var_value);
+                            }
                         }
                     }
                 }
             }
         }
     }
-
     free(buffer);
     return 0;
 }
