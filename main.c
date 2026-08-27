@@ -165,9 +165,14 @@ int main(int argc, char *argv[])
                 int redirect_count = 0;
                 bool parent = false;
                 for (int i = 0; i < 5; i++)
+                {
                     if (strcmp(tokens[0], parent_processes[i]) == 0)
+                    {
                         parent = true;
+                    }
+                }
                 for (int i = 0; i < 4; i++)
+                {
                     for (int j = 1; j < toksize; j++)
                     {
                         // this whole if statement just adds to the redirect and symbol lists and reallocs them
@@ -201,14 +206,32 @@ int main(int argc, char *argv[])
                                 indexes = temp_idx;
                                 indexes[(redirect_count - 1) * 2] = j;
                                 indexes[(redirect_count - 1) * 2 + 1] = j + 1;
-                                j++;
+                                j++; // skips the filename that comes after
                             }
                             else
                             { // if the command ended with <, >, >> or 2>
-                                printf("Error: no token after redirection symbol");
+                                printf("Error: no token after redirection symbol\n");
                             }
                         }
                     }
+                }
+                for (int i = 0; i < redirect_count * 2; i++)
+                {
+                    tokens[indexes[i]] = NULL; // sets all symbols and filenames to null, leaving only the original command
+                }
+                char **new_tokens = malloc((toksize - (redirect_count * 2) + 1) * sizeof(char **)); // gives enough space for commands without redirections
+                int p = 0;
+                for (int i = 0; i < toksize; i++)
+                {
+                    if (tokens[i] != NULL)
+                    {
+                        new_tokens[p] = tokens[i];
+                        p++;
+                    }
+                }
+                new_tokens[p] = NULL; // ends with NULL-terminator
+                // by now new_tokens contains the command without redirections
+                tokens = new_tokens; // makes it point to new_tokens so i dont have to change code that comes after
                 if (parent == false)
                 {
 
@@ -221,10 +244,70 @@ int main(int argc, char *argv[])
                     }
                     else if (childpid == 0) // means we're in the child
                     {
+                        // now run through all redirections
+                        int file_descriptor, new_f_desc;
+                        if (redirect_count > 0)
+                        {
+                            for (int i = 0; i < redirect_count; i++)
+                            {
+                                // redirections[i]
+                                if (strcmp(symbols[i], "<") == 0) // redirects stdin (0) to read from file instead of keyboard
+                                {
+                                    file_descriptor = open(redirections[i], O_RDONLY);
+                                    if (file_descriptor == -1)
+                                    {
+                                        perror("open");
+                                        exit(EXIT_FAILURE);
+                                    }
+                                    new_f_desc = dup2(file_descriptor, 0); // makes stdin point to the file we are reading from
+                                }
+                                else if (strcmp(symbols[i], ">") == 0) // redirects stdout (1) into file, overwriting it if it exists
+                                {
+                                    file_descriptor = open(redirections[i], O_WRONLY | O_CREAT, S_IRWXU);
+                                    if (file_descriptor == -1)
+                                    {
+                                        perror("open");
+                                        exit(EXIT_FAILURE);
+                                    }
+                                    new_f_desc = dup2(file_descriptor, 1); // makes stdout point to the file we are reading from
+                                }
+                                else if (strcmp(symbols[i], ">>") == 0) // redirects stdout (1) into file, appending to end if it exists
+                                {
+                                    file_descriptor = open(redirections[i], O_WRONLY | O_CREAT | O_APPEND, S_IRWXU);
+                                    if (file_descriptor == -1)
+                                    {
+                                        perror("open");
+                                        exit(EXIT_FAILURE);
+                                    }
+                                    new_f_desc = dup2(file_descriptor, 1); // makes stdout point to the file we are reading from
+                                }
+                                else if (strcmp(symbols[i], "2>") == 0) // redirects stderr (2) into file
+                                {
+                                    file_descriptor = open(redirections[i], O_WRONLY | O_CREAT | O_APPEND, S_IRWXU);
+                                    if (file_descriptor == -1)
+                                    {
+                                        perror("open");
+                                        exit(EXIT_FAILURE);
+                                    }
+                                    new_f_desc = dup2(file_descriptor, 2); // makes stdout point to the file we are reading from
+                                }
+                                if (new_f_desc == -1)
+                                {
+                                    perror("dup2");
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        }
                         failure = execvp(tokens[0], tokens);
                         if (failure == -1)
                         {
                             perror("execvp");
+                            exit(EXIT_FAILURE);
+                        }
+                        failure = close(file_descriptor);
+                        if (failure == -1)
+                        {
+                            perror("close");
                             exit(EXIT_FAILURE);
                         }
                     }
