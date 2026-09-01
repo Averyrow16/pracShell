@@ -231,8 +231,8 @@ int main(int argc, char *argv[])
                                         free(symbols);
                                     }
                                     symbols = temp_sym;
-                                    symbols[redirect_count - 1] = tokens[j];                              // adds the symbol                                                               // skips the filename that would come right after
-                                    int *temp_idx = realloc(indexes, redirect_count * 2 * sizeof(int *)); // reallocs for indexes of symbols and redirections
+                                    symbols[redirect_count - 1] = tokens[j];                            // adds the symbol                                                               // skips the filename that would come right after
+                                    int *temp_idx = realloc(indexes, redirect_count * 2 * sizeof(int)); // reallocs for indexes of symbols and redirections
                                     if (temp_idx == NULL)
                                     {
                                         printf("Mem. realloc. failed");
@@ -439,7 +439,7 @@ int main(int argc, char *argv[])
                         }
                         else // means we're in the parent
                         {
-                            if (pipe_com == pipe_com_size - 1)
+                            if (pipe_com == pipe_com_size - 1) // close all of them before waiting so child gets EOF
                             {
                                 close(pipefd[0]);
                                 close(pipefd[1]);
@@ -458,7 +458,8 @@ int main(int argc, char *argv[])
                                     EXIT_STATUS = WEXITSTATUS(status);
                                 }
                             }
-                            if (pipe_com != 0 && pipe_com != pipe_com_size - 1)
+                            if (pipe_com != 0 && pipe_com != pipe_com_size - 1) // if not the start or the end
+                            // not the end cuz i already closed all of them for last command
                             {
                                 close(prevpipe[0]);
                                 close(prevpipe[1]);
