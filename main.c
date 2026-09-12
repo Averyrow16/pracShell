@@ -81,22 +81,27 @@ int main(int argc, char *argv[])
     char **tokens = NULL;
     char **commands = NULL;
     char **pipe_commands = NULL;
+    pid_t *pids = NULL;
+
     while (1)
     {
 
         free(tokens);
         free(commands);
         free(pipe_commands);
+        free(pids);
         tokens = NULL;
         commands = NULL;
         pipe_commands = NULL;
-        int tok_size = 0, com_size = 0, pipe_com_size = 0;
+        pids = NULL;
+        int tok_size = 0, com_size = 0, pipe_com_size = 0, pid_size = 0;
         printf("mysh> ");
         // read a line of input using getline()
         chars = getline(&buffer, &bufsize, stdin); // dynamic allocation, must free later
         // checsk if getline returned -1 (e.g. Ctrl+D / EOF) and exit the loop if so
         if (chars == -1)
         {
+            printf("reached");
             break;
         }
         // strips trailing newline character that getline includes
@@ -198,12 +203,12 @@ int main(int argc, char *argv[])
                     char **symbols = NULL;
                     int *indexes = NULL;
                     int redirect_count = 0;
-                    bool parent = false;
+                    bool parent_process = false;
                     for (int i = 0; i < 5; i++)
                     {
                         if (strcmp(tokens[0], parent_processes[i]) == 0)
                         {
-                            parent = true;
+                            parent_process = true;
                         }
                     }
                     for (int i = 0; i < 4; i++)
@@ -267,12 +272,11 @@ int main(int argc, char *argv[])
                     new_tokens[p] = NULL; // ends with NULL-terminator
                     // by now new_tokens contains the command without redirections
                     tokens = new_tokens; // makes it point to new_tokens so i dont have to change code that comes after
-                    if (parent == false)
+                    if (parent_process == false)
                     {
                         // we dont need to check for last command bc we don't pipe on last command
-                        if (pipe_com_size > 1)
-                        {                                            // if there acc is a pipe
-                                                                     //  we dont need to check for last command bc we don't pipe on last command
+                        if (pipe_com_size > 1) // if there acc is a pipe
+                        {
                             if (pipe_commands[pipe_com + 1] != NULL) // if not on last command
                             {
                                 if (pipe_com == 0) // first command so we dont change stdin
@@ -439,27 +443,36 @@ int main(int argc, char *argv[])
                         }
                         else // means we're in the parent
                         {
+                            pid_t *temp_pid = realloc(pids, (pid_size + 1) * sizeof(pid_t));
+                            pids = temp_pid;
+                            pids[pid_size] = childpid;
                             if (pipe_com == pipe_com_size - 1) // close all of them before waiting so child gets EOF
                             {
-                                close(pipefd[0]);
-                                close(pipefd[1]);
-                                close(prevpipe[0]);
-                                close(prevpipe[1]);
-                            }
-                            wait = waitpid(childpid, &status, 0);
-                            if (wait == -1)
-                            {
-                                perror("waitpid");
-                            }
-                            else
-                            {
-                                if (WIFEXITED(status))
+                                if (pipe_com_size != 1) // so we dont accidentally close fds 0 and 1
                                 {
-                                    EXIT_STATUS = WEXITSTATUS(status);
+                                    close(pipefd[0]);
+                                    close(pipefd[1]);
+                                    close(prevpipe[0]);
+                                    close(prevpipe[1]);
+                                }
+                                for (int p = 0; p < pid_size + 1; p++)
+                                {
+                                    wait = waitpid(childpid, &status, 0);
+                                    if (wait == -1)
+                                    {
+                                        perror("waitpid");
+                                    }
+                                    else
+                                    {
+                                        if (WIFEXITED(status))
+                                        {
+                                            EXIT_STATUS = WEXITSTATUS(status);
+                                        }
+                                    }
                                 }
                             }
-                            if (pipe_com != 0 && pipe_com != pipe_com_size - 1) // if not the start or the end
-                            // not the end cuz i already closed all of them for last command
+                            if (pipe_com != 0 && pipe_com != pipe_com_size - 1) // if not the start nor the end
+                            // cant do on end cuz i already closed all of them for last command
                             {
                                 close(prevpipe[0]);
                                 close(prevpipe[1]);
