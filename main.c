@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define MAX_ARGS 64
 #define HASHSIZE 101
@@ -74,7 +75,9 @@ struct nlist *install(char *name, char *defn)
 
 int main(int argc, char *argv[])
 {
-
+    pid_t SHELL_PID = getpid(); // will never be changed
+    // pid_t SHELL_GROUP_PID = tcgetpgrp(0);
+    setpgid(0, 0);
     char *buffer = NULL;
     size_t bufsize = 0;
     ssize_t chars;
@@ -130,6 +133,9 @@ int main(int argc, char *argv[])
         }
         for (int com = 0; com < com_size; com++) // for each command
         {
+            pid_t child_group_pid = -1;
+            pipe_com_size = 0;
+            pid_size = 0;
 
             char *cur_buffer = commands[com];
 
@@ -158,7 +164,8 @@ int main(int argc, char *argv[])
             // k so now we have pipe_commands which is an array of all pipe commands
             // now we need a for loop that checks the current command and the next one
             int pipe_fail, dup_fail;
-            int pipefd[2], prevpipe[2];
+            int pipefd[2];
+            int prev_read_fd;
             for (int pipe_com = 0; pipe_com < pipe_com_size; pipe_com++)
             {
                 // resetting tokens
@@ -279,25 +286,12 @@ int main(int argc, char *argv[])
                         {
                             if (pipe_commands[pipe_com + 1] != NULL) // if not on last command
                             {
-                                if (pipe_com == 0) // first command so we dont change stdin
+                                pipe_fail = pipe(pipefd); // pipe pipe pipe
+                                // now pipefd contains start and end file descriptors of pipe
+                                if (pipe_fail == -1)
                                 {
-                                    pipe_fail = pipe(pipefd); // pipe pipe pipe
-                                    // now pipefd contains start and end file descriptors of pipe
-                                    if (pipe_fail == -1)
-                                    {
-                                        printf("Error: pipe failure");
-                                        exit(EXIT_FAILURE);
-                                    }
-                                }
-                                else // middle of the pipe
-                                {
-                                    pipe_fail = pipe(pipefd); // pipe pipe pipe
-                                    // now pipefd contains start and end file descriptors of pipe
-                                    if (pipe_fail == -1)
-                                    {
-                                        printf("Error: pipe failure");
-                                        exit(EXIT_FAILURE);
-                                    }
+                                    printf("Error: pipe failure");
+                                    exit(EXIT_FAILURE);
                                 }
                             }
                         }
@@ -308,9 +302,15 @@ int main(int argc, char *argv[])
                             perror("fork");
                             exit(EXIT_FAILURE);
                         }
-
-                        else if (childpid == 0) // means we're in the child
+                        if (child_group_pid == -1) // ensures we only do this for the FIRST childpid so it will apply to all other childpids in the pipeline
                         {
+                            child_group_pid = (childpid != 0) ? childpid : getpid(); // so either way it becomes the childs pid
+                            tcsetpgrp(0, child_group_pid);
+                        }
+
+                        if (childpid == 0) // means we're in the child
+                        {
+                            setpgid(getpid(), child_group_pid); // adds childpid to child_group_pid (getpid is in this case the childpid)
                             if (pipe_com_size > 1)
                             { // if there acc is a pipe
                                 // ok so pipe() returns 2 file descriptors that refer to ends of the pipe (pipefd[0] read and pipefd[1] write)
@@ -323,16 +323,13 @@ int main(int argc, char *argv[])
                                 {
                                     // then we dont change stdout
                                     // now pipefd contains start and end file descriptors of pipe
-                                    dup_fail = dup2(prevpipe[0], 0); // means we get input from reading whats in the pipe
+                                    dup_fail = dup2(prev_read_fd, 0); // means we get input from reading whats in the pipe
                                     if (dup_fail == -1)
                                     {
                                         printf("Error: dup failure1");
                                         exit(EXIT_FAILURE);
                                     }
-                                    close(prevpipe[0]);
-                                    close(prevpipe[1]);
-                                    close(pipefd[0]);
-                                    close(pipefd[1]);
+                                    close(prev_read_fd);
                                 }
                                 else // we can assume this pipe is either the beginning or in the middle
                                 {
@@ -344,12 +341,12 @@ int main(int argc, char *argv[])
                                             printf("Error: dup failure2");
                                             exit(EXIT_FAILURE);
                                         }
-                                        close(pipefd[0]);
+                                        prev_read_fd = pipefd[0];
                                         close(pipefd[1]);
                                     }
                                     else // middle of the pipe
                                     {
-                                        dup_fail = dup2(prevpipe[0], 0); // means we get input from reading whats in the pipe
+                                        dup_fail = dup2(prev_read_fd, 0); // means we get input from reading whats in the pipe
                                         if (dup_fail == -1)
                                         {
                                             printf("Error: dup failure3");
@@ -361,9 +358,8 @@ int main(int argc, char *argv[])
                                             printf("Error: dup failure4");
                                             exit(EXIT_FAILURE);
                                         }
-                                        close(prevpipe[0]);
-                                        close(prevpipe[1]);
-                                        close(pipefd[0]);
+                                        close(prev_read_fd);
+                                        prev_read_fd = pipefd[0];
                                         close(pipefd[1]);
                                     } // beforehand i tried dup2(prevpipe[0]. pipefd[1]) which didn't work bc that just makes the pointers point to the same read end
                                     // by connecting them to stdin and stdout we make the data go through the reading and writing that is required once the command is ran
@@ -446,18 +442,24 @@ int main(int argc, char *argv[])
                             pid_t *temp_pid = realloc(pids, (pid_size + 1) * sizeof(pid_t));
                             pids = temp_pid;
                             pids[pid_size] = childpid;
+                            pid_size += 1;
+                            setpgid(childpid, child_group_pid);
+                            // needs more complex code if multiple commands
+
+                            if (pipe_com > 0) // only closes if its exists
+                            {
+                                close(prev_read_fd);
+                            }
+                            if (pipe_com < pipe_com_size - 1) // only closes if pipefd hasnt already been touched from prev iteration
+                            {
+                                prev_read_fd = pipefd[0];
+                                close(pipefd[1]);
+                            }
                             if (pipe_com == pipe_com_size - 1) // close all of them before waiting so child gets EOF
                             {
-                                if (pipe_com_size != 1) // so we dont accidentally close fds 0 and 1
+                                for (int p = 0; p < pid_size; p++)
                                 {
-                                    close(pipefd[0]);
-                                    close(pipefd[1]);
-                                    close(prevpipe[0]);
-                                    close(prevpipe[1]);
-                                }
-                                for (int p = 0; p < pid_size + 1; p++)
-                                {
-                                    wait = waitpid(childpid, &status, 0);
+                                    wait = waitpid(pids[p], &status, 0);
                                     if (wait == -1)
                                     {
                                         perror("waitpid");
@@ -470,15 +472,16 @@ int main(int argc, char *argv[])
                                         }
                                     }
                                 }
+                                sigset_t old_set, new_set;
+                                sigprocmask(0, NULL, &old_set);
+                                sigemptyset(&new_set);
+                                sigaddset(&new_set, SIGTTOU);
+                                sigprocmask(SIG_BLOCK, &new_set, &old_set);
+                                // printf("About to restore foreground, SHELL_PID=%d, getpgid result=%d\n", SHELL_PID, getpgid(SHELL_PID));
+                                tcsetpgrp(0, getpgid(SHELL_PID));
+                                // printf("tcsetpgrp restore returned: %d\n", restore_result);
+                                sigprocmask(SIG_SETMASK, &old_set, NULL);
                             }
-                            if (pipe_com != 0 && pipe_com != pipe_com_size - 1) // if not the start nor the end
-                            // cant do on end cuz i already closed all of them for last command
-                            {
-                                close(prevpipe[0]);
-                                close(prevpipe[1]);
-                            }
-                            prevpipe[0] = pipefd[0];
-                            prevpipe[1] = pipefd[1];
                         }
                     }
                     else
